@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+            oracle: subread-2.1.1-Linux-x86_64.tar.gz
+            oracle_sha256: b3faa48246425f3d67bc5c283dbe67992f8686e5b5192dba527b154a1034d3a0
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+            oracle: ""
+            oracle_sha256: ""
+          - target: macos-x86_64
+            runner: macos-15-intel
+            oracle: subread-2.1.1-macOS-x86_64.tar.gz
+            oracle_sha256: 1b4243c8282513272321aaebe539d20e45d9f33430d293aa37b3a8bcb481214a
+          - target: macos-aarch64
+            runner: macos-15
+            oracle: subread-2.1.1-macOS-arm64.tar.gz
+            oracle_sha256: 58f4d9a08d88334871fd89a1a87df1fc5560fe6ebad2e4527514cd7f8e3bf49a
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust 1.91
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: clippy,rustfmt
+
+      - name: Format
+        if: matrix.target == 'linux-x86_64'
+        run: cargo fmt --all -- --check
+
+      - name: Strict Clippy
+        if: matrix.target == 'linux-x86_64'
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Documentation
+        if: matrix.target == 'linux-x86_64'
+        run: cargo doc --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Test debug
+        run: cargo test --locked --all-targets --all-features
+
+      - name: Test release
+        run: cargo test --release --locked --all-targets --all-features
+
+      - name: Install featureCounts 2.1.1 oracle
+        if: matrix.oracle != ''
+        shell: bash
+        run: |
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output "${{ matrix.oracle }}" \
+            "https://downloads.sourceforge.net/project/subread/subread-2.1.1/${{ matrix.oracle }}?download=1"
+          echo "${{ matrix.oracle_sha256 }}  ${{ matrix.oracle }}" | shasum -a 256 -c -
+          tar -xzf "${{ matrix.oracle }}"
+          archive="${{ matrix.oracle }}"
+          directory="${archive%.tar.gz}"
+          oracle="$directory/bin/featureCounts"
+          "$oracle" -v 2>&1 | grep 'v2.1.1'
+          echo "FEATURECOUNTS=$PWD/$oracle" >> "$GITHUB_ENV"
+
+      - name: Test live featureCounts compatibility
+        if: matrix.oracle != ''
+        run: cargo test --locked --test live_oracle
+
+      - name: Verify package
+        if: matrix.target == 'linux-x86_64'
+        run: cargo package --locked

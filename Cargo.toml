@@ -1,0 +1,42 @@
+[package]
+name = "rsomics-count"
+version = "0.1.0"
+description = "Genomic feature counting and count-matrix normalization"
+edition = "2024"
+rust-version = "1.91"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/omics-rust/rsomics-count"
+homepage = "https://github.com/omics-rust/rsomics-count"
+documentation = "https://docs.rs/rsomics-count"
+authors = ["Zane Leong <efd@live.com>"]
+readme = "README.md"
+categories = ["science", "command-line-utilities"]
+keywords = ["featurecounts", "rna-seq", "bam", "gtf", "bioinformatics"]
+
+[lib]
+name = "rsomics_count"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "rsomics-count"
+path = "src/main.rs"
+
+[dependencies]
+bstr = "1"
+clap = { version = "4", features = ["derive"] }
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+noodles = { version = "0.110", features = ["bam", "bgzf", "sam"] }
+noodles-bgzf = { version = "0.47", features = ["libdeflate"] }
+noodles-gff = "0.55"
+noodles-gtf = "0.50"
+noodles-util = { version = "0.79", features = ["alignment"] }
+rsomics-bamio = "0.5"
+rsomics-common = "0.12"
+rsomics-help = "0.4"
+rsomics-intervals = "0.3"
+serde = { version = "1", features = ["derive"] }
+smallvec = "1"
+
+[dev-dependencies]
+tempfile = "3"
