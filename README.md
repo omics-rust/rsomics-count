@@ -23,4 +23,9 @@ transactions, and `rsomics-help` for the shared CLI presentation. Counting
 work is distributed through bounded worker queues; query-name-sorted pairs are
 streamed without retaining the library in memory.
 
+The recorded featureCounts 2.1.1 gate has exact normalized counts and summary
+columns for the benchmark cases. The current implementation is slower in wall
+time and uses substantially less peak resident memory; the measurements and
+provenance are in [`benchmarks/2026-08-02`](benchmarks/2026-08-02/README.md).
+
 Licensed under MIT OR Apache-2.0.
