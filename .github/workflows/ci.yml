@@ -66,6 +66,7 @@ jobs:
         if: matrix.oracle != ''
         shell: bash
         run: |
+          cd "$RUNNER_TEMP"
           curl --fail --location --retry 5 --retry-all-errors \
             --output "${{ matrix.oracle }}" \
             "https://downloads.sourceforge.net/project/subread/subread-2.1.1/${{ matrix.oracle }}?download=1"
@@ -75,7 +76,7 @@ jobs:
           directory="${archive%.tar.gz}"
           oracle="$directory/bin/featureCounts"
           "$oracle" -v 2>&1 | grep 'v2.1.1'
-          echo "FEATURECOUNTS=$PWD/$oracle" >> "$GITHUB_ENV"
+          echo "FEATURECOUNTS=$RUNNER_TEMP/$oracle" >> "$GITHUB_ENV"
 
       - name: Test live featureCounts compatibility
         if: matrix.oracle != ''
