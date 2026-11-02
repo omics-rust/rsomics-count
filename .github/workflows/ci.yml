@@ -9,63 +9,115 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_BUILD_JOBS: '2'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   native:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: linux-x86_64
             runner: ubuntu-24.04
+            host: x86_64-unknown-linux-gnu
             oracle: subread-2.1.1-Linux-x86_64.tar.gz
             oracle_sha256: b3faa48246425f3d67bc5c283dbe67992f8686e5b5192dba527b154a1034d3a0
           - target: linux-aarch64
             runner: ubuntu-24.04-arm
+            host: aarch64-unknown-linux-gnu
             oracle: ""
             oracle_sha256: ""
           - target: macos-x86_64
             runner: macos-15-intel
+            host: x86_64-apple-darwin
             oracle: subread-2.1.1-macOS-x86_64.tar.gz
             oracle_sha256: 1b4243c8282513272321aaebe539d20e45d9f33430d293aa37b3a8bcb481214a
           - target: macos-aarch64
             runner: macos-15
+            host: aarch64-apple-darwin
             oracle: subread-2.1.1-macOS-arm64.tar.gz
             oracle_sha256: 58f4d9a08d88334871fd89a1a87df1fc5560fe6ebad2e4527514cd7f8e3bf49a
 
+    env:
+      NATIVE_TARGET: ${{ matrix.target }}
+      EXPECTED_HOST: ${{ matrix.host }}
+
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prepare runner storage
+        run: |
+          set -euo pipefail
+          for pair in CARGO_HOME=cargo-home CARGO_TARGET_DIR=cargo-target RUSTUP_HOME=rustup-home TMPDIR=scratch XDG_CACHE_HOME=cache; do
+            name="${pair%%=*}"
+            path="$RUNNER_TEMP/${pair#*=}"
+            mkdir -p "$path"
+            printf '%s=%s\n' "$name" "$path" >> "$GITHUB_ENV"
+          done
+          mkdir -p "$RUNNER_TEMP/delivery"
+          python3 -B - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          for name in ('cargo-home', 'cargo-target', 'rustup-home', 'scratch', 'cache'):
+              path = (root / name).resolve(strict=True)
+              assert path.is_relative_to(root) and path.stat().st_dev == root.stat().st_dev
+              print(path)
+          PY
+          git rev-parse HEAD
+          uname -a
+          df -h "$RUNNER_TEMP"
 
       - name: Install Rust 1.91
         uses: dtolnay/rust-toolchain@1.91.0
         with:
           components: clippy,rustfmt
 
+      - name: Verify native compiler and resolved target
+        run: |
+          set -euo pipefail
+          rustc -Vv | tee "$RUNNER_TEMP/delivery/rustc.txt"
+          cargo -V | tee "$RUNNER_TEMP/delivery/cargo.txt"
+          uname -a | tee "$RUNNER_TEMP/delivery/native-host.txt"
+          test "$(rustc -Vv | sed -n 's/^host: //p')" = "$EXPECTED_HOST"
+          cargo metadata --locked --no-deps --format-version 1 | python3 -B -c \
+            'import json,os,sys; assert json.load(sys.stdin)["target_directory"] == os.environ["CARGO_TARGET_DIR"]'
+
       - name: Format
-        if: matrix.target == 'linux-x86_64'
-        run: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check > "$RUNNER_TEMP/delivery/fmt.stdout" 2> "$RUNNER_TEMP/delivery/fmt.stderr"
 
       - name: Strict Clippy
-        if: matrix.target == 'linux-x86_64'
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings > "$RUNNER_TEMP/delivery/clippy.stdout" 2> "$RUNNER_TEMP/delivery/clippy.stderr"
 
       - name: Documentation
-        if: matrix.target == 'linux-x86_64'
-        run: cargo doc --locked --no-deps
+        run: cargo doc --locked --no-deps > "$RUNNER_TEMP/delivery/rustdoc.stdout" 2> "$RUNNER_TEMP/delivery/rustdoc.stderr"
         env:
           RUSTDOCFLAGS: -D warnings
 
       - name: Test debug
-        run: cargo test --locked --all-targets --all-features
+        run: cargo test --locked --all-targets --all-features > "$RUNNER_TEMP/delivery/debug.stdout" 2> "$RUNNER_TEMP/delivery/debug.stderr"
 
       - name: Test release
-        run: cargo test --release --locked --all-targets --all-features
+        run: cargo test --release --locked --all-targets --all-features > "$RUNNER_TEMP/delivery/release.stdout" 2> "$RUNNER_TEMP/delivery/release.stderr"
 
       - name: Install featureCounts 2.1.1 oracle
         if: matrix.oracle != ''
         shell: bash
         run: |
+          set -euo pipefail
+          exec > >(tee "$RUNNER_TEMP/delivery/oracle-install.stdout") 2> >(tee "$RUNNER_TEMP/delivery/oracle-install.stderr" >&2)
           cd "$RUNNER_TEMP"
           curl --fail --location --retry 5 --retry-all-errors \
             --output "${{ matrix.oracle }}" \
@@ -75,13 +127,57 @@ jobs:
           archive="${{ matrix.oracle }}"
           directory="${archive%.tar.gz}"
           oracle="$directory/bin/featureCounts"
-          "$oracle" -v 2>&1 | grep 'v2.1.1'
+          "$oracle" -v > "$RUNNER_TEMP/delivery/oracle-version.txt" 2>&1
+          grep 'v2.1.1' "$RUNNER_TEMP/delivery/oracle-version.txt"
+          shasum -a 256 "$oracle" > "$RUNNER_TEMP/delivery/oracle-binary.sha256"
           echo "FEATURECOUNTS=$RUNNER_TEMP/$oracle" >> "$GITHUB_ENV"
+
+      - name: Record upstream coverage scope
+        run: |
+          python3 -B - <<'PY'
+          import json, os
+          from pathlib import Path
+          live = bool(os.environ.get('FEATURECOUNTS'))
+          assert live == (os.environ['NATIVE_TARGET'] != 'linux-aarch64')
+          Path(os.environ['RUNNER_TEMP'], 'delivery', 'oracle-scope.json').write_text(
+              json.dumps(dict(live_featurecounts_2_1_1=live, frozen_compatibility=True,
+                              linux_arm_has_no_official_binary=not live), indent=2) + '\n')
+          PY
 
       - name: Test live featureCounts compatibility
         if: matrix.oracle != ''
-        run: cargo test --locked --test live_oracle
+        run: cargo test --locked --test live_oracle > "$RUNNER_TEMP/delivery/live-oracle.stdout" 2> "$RUNNER_TEMP/delivery/live-oracle.stderr"
 
-      - name: Verify package
-        if: matrix.target == 'linux-x86_64'
-        run: cargo package --locked
+      - name: Verify complete source package
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/delivery/full-metadata.json"
+          cargo metadata --locked --no-deps --format-version 1 > "$RUNNER_TEMP/delivery/package-metadata.json"
+          cargo package --locked --list > "$RUNNER_TEMP/delivery/package-files.txt"
+          cargo package --locked > "$RUNNER_TEMP/delivery/package.stdout" 2> "$RUNNER_TEMP/delivery/package.stderr"
+          python3 -B scripts/delivery.py source
+
+      - name: Test packaged release with declared live or frozen coverage
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path "$PACKAGE_DIRECTORY/Cargo.toml" --release --locked --all-targets --all-features \
+            > "$RUNNER_TEMP/delivery/packaged-tests.stdout" 2> "$RUNNER_TEMP/delivery/packaged-tests.stderr"
+
+      - name: Install and exercise packaged binary
+        run: |
+          set -euo pipefail
+          cargo install --path "$PACKAGE_DIRECTORY" --locked --root "$RUNNER_TEMP/installed" \
+            > "$RUNNER_TEMP/delivery/install.stdout" 2> "$RUNNER_TEMP/delivery/install.stderr"
+          python3 -B "$PACKAGE_DIRECTORY/scripts/delivery.py" smoke --binary "$RUNNER_TEMP/installed/bin/rsomics-count"
+
+      - name: Assemble native delivery candidate
+        run: python3 -B scripts/delivery.py bundle --binary "$RUNNER_TEMP/installed/bin/rsomics-count"
+
+      - name: Retain source and native delivery candidates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rsomics-count-delivery-${{ matrix.target }}-${{ github.sha }}
+          path: ${{ runner.temp }}/delivery/
+          if-no-files-found: error
+          retention-days: 90
