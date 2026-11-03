@@ -1,6 +1,6 @@
 [package]
 name = "rsomics-count"
-version = "0.1.0"
+version = "0.2.0"
 description = "Genomic feature counting and count-matrix normalization"
 edition = "2024"
 rust-version = "1.91"

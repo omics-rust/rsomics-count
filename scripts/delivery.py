@@ -149,6 +149,8 @@ def smoke(binary):
     (directory / 'library-b.sam').write_bytes(b''.join(line for line in
         (fixture / 'single.sam').read_bytes().splitlines(keepends=True) if not line.startswith(b'rA\t')))
     shutil.copy2(fixture / 'model.gtf', directory / 'genes.gtf')
+    for name in ('projection-paired.sam', 'projection-paired.saf'):
+        shutil.copy2(fixture / name, directory / name)
     records = []
 
     def run(arguments, *, stdin=None, status=0):
@@ -176,7 +178,9 @@ def smoke(binary):
     require(out.read_text().strip() == PRODUCT + ' ' + os.environ['PACKAGE_VERSION'], 'installed version differs')
     out, _ = run(['--help'])
     require('normalize' in out.read_text() and '--summary' in out.read_text() and
-            'summarize' not in out.read_text(), 'installed counting/default-normalize scope differs')
+            'summarize' not in out.read_text() and
+            all(flag in out.read_text() for flag in ('--read-extension5', '--read-extension3', '--read2pos')),
+            'installed counting/default-normalize scope differs')
     matrix = directory / 'counts.tsv'
     summary = directory / 'counts.summary.tsv'
     out, err = run(['library-a.sam', 'library-b.sam', '-a', 'genes.gtf', '-o', matrix,
@@ -198,6 +202,23 @@ def smoke(binary):
     require(summary.read_text() == 'Status\tlibrary-a.sam\tlibrary-b.sam\n' +
             ''.join(f'{name}\t{value}\t{value - (name == "Assigned")}\n' for name, value in categories),
             'installed complete assignment summary differs')
+    projected_matrix = directory / 'projected.tsv'
+    projected_summary = directory / 'projected.summary.tsv'
+    out, err = run(['projection-paired.sam', '-a', 'projection-paired.saf', '-F', 'saf', '-o', projected_matrix,
+                    '--summary', projected_summary, '--paired', '--strand', 'sense', '--multi-overlap', 'full',
+                    '--read-extension5', '10', '--read-extension3', '7', '--read2pos', '5',
+                    '--frac-overlap', '.05', '--threads', '1', '--json'])
+    report = success(out, err, 'count')
+    require(report['features'] == 2 and len(report['libraries']) == 1 and
+            report['libraries'][0]['total'] == 1 and report['libraries'][0]['assigned'] == 1,
+            'installed projected paired count report differs')
+    require(projected_matrix.read_text() == '# Program:rsomics-count v' + os.environ['PACKAGE_VERSION'] + '\n' +
+            'Geneid\tChr\tStart\tEnd\tStrand\tLength\tprojection-paired.sam\n'
+            'five-forward\tchr1\t90\t100\t+\t11\t1\n'
+            'five-reverse\tchr1\t130\t140\t+\t11\t1\n' and
+            projected_summary.read_text() == 'Status\tprojection-paired.sam\n' +
+            ''.join(f'{name}\t{int(name == "Assigned")}\n' for name, _ in categories),
+            'installed complete projected paired matrix and summary differ')
     expected = {'tpm': [('571428.571429', '470588.235294'), ('238095.238095', '294117.647059'), ('190476.190476', '235294.117647')],
                 'fpkm': [('6000000.000000', '5000000.000000'), ('2500000.000000', '3125000.000000'), ('2000000.000000', '2500000.000000')],
                 'fpkm-uq': [('15000000.000000', '13333333.333333'), ('6250000.000000', '8333333.333333'), ('5000000.000000', '6666666.666667')]}
@@ -240,9 +261,10 @@ def smoke(binary):
     require(out.stat().st_size == 0 and diagnostic['error']['kind'] == 'InvalidInput' and
             diagnostic['exit_code'] == 1 and protected_matrix.read_bytes() == b'previous counts\n',
             'installed malformed normalization lost diagnostics or prior output')
-    require(len(records) == 9, 'installed lifecycle call count differs')
+    require(len(records) == 10, 'installed lifecycle call count differs')
     save(directory / 'VERIFIED.json', dict(installed_binary=identity(binary), calls=records,
-         default_count=True, summary_side_output=True, normalize_modes=list(expected),
+         default_count=True, projected_count=True, call_count=len(records),
+         summary_side_output=True, normalize_modes=list(expected),
          own_output_reloaded=True, complete_matrix_and_summary=True, stdin_default_summary=True,
          common_json=True, malformed_alignment_preserves_both_outputs=True,
          malformed_normalization_preserves_output=True,
@@ -272,8 +294,11 @@ def bundle(binary, candidate=False):
          source_package=json.loads((delivery / 'package-verification.json').read_bytes()),
          native_dependencies=json.loads((delivery / 'native-dependencies.json').read_bytes()),
          installed_lifecycle=json.loads((delivery / 'lifecycle/VERIFIED.json').read_bytes()),
-         accepted_implementation_base='5bc764d8af75171c4ac2e4a9e4a153d0e2d05b49',
+         accepted_implementation_base='2b5e450372689063736721dc1b807dcba9d62717',
          historical_performance_source='3a0154b15c8a985b999a98c4dd61d07a7533dec3',
+         projection_performance_source='2b5e450372689063736721dc1b807dcba9d62717',
+         projection_performance_record=dict(path='benchmarks/2026-11-03/projection-samples.json',
+             **identity(ROOT / 'benchmarks/2026-11-03/projection-samples.json')),
          this_binary_remeasured=False, registry_publication=False, signed_release=False,
          immutable_registry_archive_equivalent=False, local_uncommitted_candidate=candidate)
     require(provenance['source_package']['clean_vcs'] == (not candidate) and provenance['source_package']['source_commit'] ==

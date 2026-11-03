@@ -9,22 +9,22 @@ GTF, GFF3, and SAF annotations; feature or meta-feature counting; multiple
 libraries; stranded and paired-fragment modes; overlap, mapping, and pair
 filters; and full or fractional multi-overlap and multi-mapping contributions.
 
-Current source corrects deletion-gap coverage and read-fraction calculations
+The unreleased 0.2.0 candidate corrects deletion-gap coverage and read-fraction calculations
 in the 0.1.0 distribution. `--frac-overlap` uses original CIGAR geometry,
 including insertion and soft-clip contributions; overlapping paired reads
 use fragment unions rather than summed mate lengths. Target overlap also
 counts shared mate coverage once. These corrections are not yet released.
 The [read-fraction correction measurements](benchmarks/2026-11-03/README.md) at
 `1e63643` preserve exact
-counts and summaries on representative inputs, with82–85% lower peak RSS
+counts and summaries on representative inputs, with 82–85% lower peak RSS
 and slower wall time than featureCounts.
 
 Unreleased source also supports `--read-extension5`, `--read-extension3` and
 `--read2pos {3,5}`. Each mate is extended in its own biological orientation,
 clipped to the alignment-header chromosome bounds, then optionally reduced
 to one reference base. Original CIGAR length and split status are retained
-for filtering. These API additions require the next minor release; they are
-not present in the immutable0.1.0 packages or covered by the earlier timings.
+for filtering. These API additions are included in the 0.2.0 candidate; they are
+not present in the immutable 0.1.0 packages or covered by the earlier timings.
 Its [fresh projection measurements](benchmarks/2026-11-03/projection.md) retain
 the lower-RSS/slower-wall result with exact complete output agreement.
 
@@ -50,6 +50,10 @@ time and uses substantially less peak resident memory; the measurements and
 provenance are in the [recorded benchmark evidence](https://github.com/omics-rust/rsomics-count/blob/8ae7a2b0294557d78edba30c0a1aa9cfef1c0350/benchmarks/2026-08-02/README.md).
 
 ## Installation and delivery
+
+Version 0.2.0 is a delivery candidate, not a public release. The installation
+links below remain pinned to the immutable 0.1.0 distributions, which do not
+include the corrections or projection options described above.
 
 The [GitHub v0.1.0 release](https://github.com/omics-rust/rsomics-count/releases/tag/v0.1.0)
 provides native binaries for Linux and macOS on x86_64 and aarch64, pinned to
@@ -89,29 +93,33 @@ installed count-to-normalization lifecycle, dependency graph and complete
 notice texts. Binaries are not signed or notarized; minimum OS and external
 dynamic-library compatibility are not certified by this source inventory.
 
-The source package generated at the GitHub delivery commit includes its
+The 0.1.0 source package generated at the GitHub delivery commit includes its
 new documentation, notices and VCS identity. It is not the byte-identical
 immutable registry 0.1.0 archive and does not republish or replace that archive.
-No version, algorithm, public API or locked dependency is changed for delivery.
+That historical delivery changed no version, algorithm, public API or locked dependency.
 Original published archives retain their construction-time README/BUILD
 wording and relative benchmark link; the release notes and this README record
 the later public delivery. The tag and original assets are not replaced by
-this documentation update.
+the 0.2.0 candidate preparation.
 
 The accepted historical performance implementation is `3a0154b1`; later
 `5bc764d8` adds evidence/CI without changing its source or lockfile. Recorded
 wall time is 1.67–2.56 times featureCounts in the declared cases, with about
 87% lower RSS in the two reported four-worker cases. Those are historical
-measurements, not fresh timings of the new native carriers or universal gains.
+measurements, not fresh timings of the native carriers or universal gains.
+The candidate's accepted implementation and projection performance source is
+`2b5e450`; its [projection measurements](benchmarks/2026-11-03/projection.md)
+show 82–85% lower peak RSS and 1.43–1.64 times featureCounts wall time in the
+declared cases. Delivery binaries are not independently remeasured.
 
 CI retains all four native debug/release and frozen compatibility suites.
 Pinned official featureCounts 2.1.1 runs live on Linux x86_64 and both macOS
 architectures. Linux aarch64 has frozen compatibility, not a fourth live
 oracle; local checks with FEATURECOUNTS unset do not execute upstream software.
 
-CRAM, transcript-abundance inference, read-position projection, junction counts,
+CRAM, transcript-abundance inference, junction counts,
 read-group stratification, long-read mode, per-record assignments,
-largest-overlap and non-overlap limits remain outside this released slice.
+largest-overlap and non-overlap limits remain outside the candidate slice.
 See [attribution](ATTRIBUTION.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
 The notices explicitly label the team-owned MIT/Apache supplement for the
 historical `rsomics-bamio 0.5.0` license-text omission; it is not recovered
