@@ -43,6 +43,125 @@ fn sam_to_bam(source: &Path, destination: &Path) {
 }
 
 #[test]
+fn invalid_projection_options_preserve_outputs() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("counts.tsv");
+    fs::write(&output, "keep").unwrap();
+    for args in [["--read2pos", "4"], ["--read-extension5", "2147483648"]] {
+        let result = Command::new(binary())
+            .arg(fixture("projection.sam"))
+            .arg("-a")
+            .arg(fixture("projection.saf"))
+            .args(["-F", "saf"])
+            .arg("-o")
+            .arg(&output)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert_eq!(fs::read_to_string(&output).unwrap(), "keep");
+    }
+}
+
+#[test]
+fn projection_preserves_section_endpoints_and_original_fragment_length() {
+    let directory = tempfile::tempdir().unwrap();
+    let single = fixture("projection.sam");
+    let bam = directory.path().join("projection.bam");
+    sam_to_bam(&single, &bam);
+    let paired = fixture("projection-paired.sam");
+    for (name, input, annotation, extra, expected) in [
+        (
+            "extensions",
+            &single,
+            "projection.saf",
+            vec![],
+            vec!["2", "2", "2", "1", "1"],
+        ),
+        (
+            "five",
+            &bam,
+            "projection.saf",
+            vec!["--read2pos", "5"],
+            vec!["2", "0", "2", "0", "1"],
+        ),
+        (
+            "three",
+            &single,
+            "projection.saf",
+            vec!["--read2pos", "3"],
+            vec!["1", "2", "0", "1", "1"],
+        ),
+        (
+            "paired-low",
+            &paired,
+            "projection-paired.saf",
+            vec![
+                "--paired",
+                "--strand",
+                "sense",
+                "--read2pos",
+                "5",
+                "--frac-overlap",
+                ".05",
+            ],
+            vec!["1", "1"],
+        ),
+        (
+            "paired-high",
+            &paired,
+            "projection-paired.saf",
+            vec![
+                "--paired",
+                "--strand",
+                "sense",
+                "--read2pos",
+                "5",
+                "--frac-overlap",
+                ".1",
+            ],
+            vec!["0", "0"],
+        ),
+    ] {
+        let output = directory.path().join(format!("{name}.tsv"));
+        let result = Command::new(binary())
+            .arg(input)
+            .arg("-a")
+            .arg(fixture(annotation))
+            .arg("-o")
+            .arg(&output)
+            .args([
+                "-F",
+                "saf",
+                "--threads",
+                "2",
+                "--multi-overlap",
+                "full",
+                "--read-extension5",
+                "10",
+                "--read-extension3",
+                "7",
+            ])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            output_counts(&output)
+                .iter()
+                .map(|row| row.last().unwrap().as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn read_fraction_uses_original_cigar_and_fragment_unions() {
     let directory = tempfile::tempdir().unwrap();
     let single = fixture("read-fraction-single.sam");

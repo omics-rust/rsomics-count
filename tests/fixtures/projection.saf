@@ -1,0 +1,6 @@
+GeneID	Chr	Start	End	Strand
+left	chr1	1	20	+
+middle	chr1	40	55	-
+gap-start	chr1	85	105	+
+gap-end	chr1	120	140	+
+right	chr1	180	200	-

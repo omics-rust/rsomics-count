@@ -8,8 +8,8 @@ use serde::Serialize;
 
 use rsomics_count::{
     AnnotationFormat, AnnotationOptions, Contribution, CountLevel, CountOptions, CountReport,
-    NormalizeMode, NormalizeOptions, NormalizeReport, PairOptions, SplitMode, StrandMode, count,
-    normalize,
+    NormalizeMode, NormalizeOptions, NormalizeReport, PairOptions, ProjectionOptions, ReadPosition,
+    SplitMode, StrandMode, count, normalize,
 };
 
 pub const META: ToolMeta = ToolMeta {
@@ -108,6 +108,18 @@ struct CountArgs {
     /// Minimum fraction of target bases overlapped.
     #[arg(long, default_value_t = 0.0, value_parser = ratio)]
     frac_overlap_feature: f64,
+
+    /// Extend each read toward its biological 5-prime end before assignment.
+    #[arg(long, default_value_t = 0)]
+    read_extension5: u32,
+
+    /// Extend each read toward its biological 3-prime end before assignment.
+    #[arg(long, default_value_t = 0)]
+    read_extension3: u32,
+
+    /// Reduce each extended read to its 3-prime or 5-prime reference base.
+    #[arg(long, value_enum)]
+    read2pos: Option<ReadPositionArg>,
 
     /// Minimum mapping quality.
     #[arg(short = 'Q', long, default_value_t = 0)]
@@ -217,6 +229,14 @@ enum SplitArg {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
+enum ReadPositionArg {
+    #[value(name = "3")]
+    ThreePrime,
+    #[value(name = "5")]
+    FivePrime,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
 enum NormalizeModeArg {
     Tpm,
     Fpkm,
@@ -285,6 +305,14 @@ impl Cli {
                 primary_only: self.count.primary_only,
                 ignore_duplicates: self.count.ignore_duplicates,
                 split: self.count.split.into(),
+                projection: ProjectionOptions {
+                    extension5: self.count.read_extension5,
+                    extension3: self.count.read_extension3,
+                    read_position: self.count.read2pos.map(|position| match position {
+                        ReadPositionArg::ThreePrime => ReadPosition::ThreePrime,
+                        ReadPositionArg::FivePrime => ReadPosition::FivePrime,
+                    }),
+                },
                 pair: PairOptions {
                     enabled: self.count.paired,
                     require_both_mapped: self.count.require_both_mapped,

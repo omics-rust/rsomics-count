@@ -1,0 +1,3 @@
+GeneID	Chr	Start	End	Strand
+five-forward	chr1	90	100	+
+five-reverse	chr1	130	140	+

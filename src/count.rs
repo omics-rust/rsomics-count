@@ -9,9 +9,10 @@ use rsomics_common::{Result, RsomicsError};
 use serde::Serialize;
 use smallvec::SmallVec;
 
-use crate::alignment::{NameMode, Reader, Segment};
+use crate::alignment::{NameMode, ReadOptions, Reader, Segment};
 use crate::annotation::{self, AnnotationOptions};
 use crate::model::{Blocks, FeatureSet, Hit, Hits, StrandMode};
+use crate::projection::ProjectionOptions;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Contribution {
@@ -63,6 +64,7 @@ pub struct CountOptions {
     pub ignore_duplicates: bool,
     pub split: SplitMode,
     pub pair: PairOptions,
+    pub projection: ProjectionOptions,
     pub aliases: Option<PathBuf>,
     pub threads: Option<NonZeroUsize>,
 }
@@ -81,6 +83,7 @@ impl Default for CountOptions {
             ignore_duplicates: false,
             split: SplitMode::Any,
             pair: PairOptions::default(),
+            projection: ProjectionOptions::default(),
             aliases: None,
             threads: None,
         }
@@ -239,6 +242,7 @@ fn validate(
     summary_path: &Path,
     options: &CountOptions,
 ) -> Result<()> {
+    options.projection.validate()?;
     if inputs.is_empty() {
         return Err(RsomicsError::ConfigError(
             "at least one alignment input is required".to_owned(),
@@ -350,8 +354,11 @@ fn count_library(
             &header,
             aliases,
             &|name| features.chrom_id(name),
-            NameMode::None,
-            options.frac_overlap > 0.0,
+            ReadOptions {
+                name_mode: NameMode::None,
+                track_extent: options.frac_overlap > 0.0,
+                projection: options.projection,
+            },
             |segment| {
                 process_unit(
                     Unit::single(segment),
@@ -382,8 +389,11 @@ fn count_pairs(
             header,
             context.aliases,
             &|name| context.features.chrom_id(name),
-            NameMode::Grouped,
-            context.options.frac_overlap > 0.0,
+            ReadOptions {
+                name_mode: NameMode::Grouped,
+                track_extent: context.options.frac_overlap > 0.0,
+                projection: context.options.projection,
+            },
             |segment| {
                 if !segment.segmented || segment.first == segment.last {
                     result.summary.unassigned_read_type += 1;
@@ -411,8 +421,11 @@ fn count_pairs(
             header,
             context.aliases,
             &|name| context.features.chrom_id(name),
-            NameMode::Owned,
-            context.options.frac_overlap > 0.0,
+            ReadOptions {
+                name_mode: NameMode::Owned,
+                track_extent: context.options.frac_overlap > 0.0,
+                projection: context.options.projection,
+            },
             |mut segment| {
                 if !segment.segmented || segment.first == segment.last {
                     result.summary.unassigned_read_type += 1;
@@ -482,8 +495,11 @@ fn count_queryname_pairs_parallel(
             header,
             context.aliases,
             &|name| context.features.chrom_id(name),
-            NameMode::Grouped,
-            context.options.frac_overlap > 0.0,
+            ReadOptions {
+                name_mode: NameMode::Grouped,
+                track_extent: context.options.frac_overlap > 0.0,
+                projection: context.options.projection,
+            },
             |segment| {
                 if !segment.segmented || segment.first == segment.last {
                     result.summary.unassigned_read_type += 1;
@@ -686,8 +702,11 @@ fn count_single_parallel(
             header,
             context.aliases,
             &|name| context.features.chrom_id(name),
-            NameMode::None,
-            context.options.frac_overlap > 0.0,
+            ReadOptions {
+                name_mode: NameMode::None,
+                track_extent: context.options.frac_overlap > 0.0,
+                projection: context.options.projection,
+            },
             |segment| {
                 batch.push(segment);
                 if batch.len() == BATCH_SIZE {

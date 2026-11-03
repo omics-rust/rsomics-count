@@ -1,0 +1,30 @@
+{
+  "packet": "/Volumes/KIOXIA/Developments/tmp/count-projection-perf-20261103.SIeiKW2O",
+  "result_sha256": "223a2c9b00e01c8355ad959a19a2495d05031594d65c914939c5b3007d0e3cb4",
+  "native_sha256": "7fd617259202b77eb112d42fcd5e33e24b8a99e163d10e633c84867bf12007e8",
+  "native_bytes": 3022000,
+  "source_sha256": "3249dea2e90721618f8af4fb547ff1e9bab987620762c1e24148b149487f8ea5",
+  "annotation_sha256": "2e43ca96b0be1d328b300c33aa386fb053fd912c2b2f93f46860dcc5b976c914",
+  "bam_sha256": "714c6579906767abaacb94fa3ccd0e30417a31954c9d5ce5b6922e25d44a9e91",
+  "threads": 4,
+  "warmups_per_tool_per_case": 1,
+  "measured_pairs_per_case": 5,
+  "complete_output_pairs": 12,
+  "verified_pins": 64,
+  "cases": [
+    {
+      "name": "default",
+      "native_wall_seconds": [0.487713042, 0.488193917, 0.542508833, 0.608432708, 0.517203125],
+      "source_wall_seconds": [0.317240375, 0.361356625, 0.326318709, 0.443543292, 0.3685],
+      "native_max_rss_bytes": [10141696, 10076160, 12042240, 15794176, 13926400],
+      "source_max_rss_bytes": [68534272, 68485120, 68485120, 64995328, 68501504]
+    },
+    {
+      "name": "five-prime",
+      "native_wall_seconds": [0.500470209, 0.536118792, 0.528503875, 0.490675084, 0.492426708],
+      "source_wall_seconds": [0.315153708, 0.40658975, 0.300644375, 0.305397917, 0.290723709],
+      "native_max_rss_bytes": [11993088, 10076160, 12025856, 10076160, 10092544],
+      "source_max_rss_bytes": [68501504, 66486272, 68501504, 68550656, 68501504]
+    }
+  ]
+}

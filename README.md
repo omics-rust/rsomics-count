@@ -14,9 +14,19 @@ in the 0.1.0 distribution. `--frac-overlap` uses original CIGAR geometry,
 including insertion and soft-clip contributions; overlapping paired reads
 use fragment unions rather than summed mate lengths. Target overlap also
 counts shared mate coverage once. These corrections are not yet released.
-The [new source measurements](benchmarks/2026-11-03/README.md) preserve exact
+The [read-fraction correction measurements](benchmarks/2026-11-03/README.md) at
+`1e63643` preserve exact
 counts and summaries on representative inputs, with82–85% lower peak RSS
 and slower wall time than featureCounts.
+
+Unreleased source also supports `--read-extension5`, `--read-extension3` and
+`--read2pos {3,5}`. Each mate is extended in its own biological orientation,
+clipped to the alignment-header chromosome bounds, then optionally reduced
+to one reference base. Original CIGAR length and split status are retained
+for filtering. These API additions require the next minor release; they are
+not present in the immutable0.1.0 packages or covered by the earlier timings.
+Its [fresh projection measurements](benchmarks/2026-11-03/projection.md) retain
+the lower-RSS/slower-wall result with exact complete output agreement.
 
 ```console
 rsomics-count sample.bam -a genes.gtf -o counts.tsv --summary counts.summary.tsv

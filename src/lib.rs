@@ -9,6 +9,7 @@ mod geometry;
 mod model;
 mod normalize;
 mod output;
+mod projection;
 
 pub use annotation::{AnnotationFormat, AnnotationOptions};
 pub use count::{
@@ -17,3 +18,4 @@ pub use count::{
 };
 pub use model::{CountLevel, StrandMode};
 pub use normalize::{NormalizeMode, NormalizeOptions, NormalizeReport, normalize};
+pub use projection::{ProjectionOptions, ReadPosition};

@@ -13,6 +13,7 @@ use rsomics_common::{Context, Result, RsomicsError};
 
 use crate::geometry::{self, Extent, Geometry};
 use crate::model::Blocks;
+use crate::projection::{Ends, ProjectionOptions};
 
 enum Inner {
     Bam(rsomics_bamio::ParallelBamReader),
@@ -51,6 +52,18 @@ pub(crate) enum NameMode {
     None,
     Owned,
     Grouped,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ReadOptions {
+    pub(crate) name_mode: NameMode,
+    pub(crate) track_extent: bool,
+    pub(crate) projection: ProjectionOptions,
+}
+
+struct ReferenceInfo {
+    chrom: Option<u32>,
+    length: u64,
 }
 
 struct NameTracker {
@@ -155,11 +168,10 @@ impl Reader {
         header: &sam::Header,
         aliases: &HashMap<String, String>,
         chrom_id: &dyn Fn(&str) -> Option<u32>,
-        name_mode: NameMode,
-        track_extent: bool,
+        options: ReadOptions,
         mut visit: impl FnMut(Segment) -> Result<()>,
     ) -> Result<()> {
-        let mut names = NameTracker::new(name_mode);
+        let mut names = NameTracker::new(options.name_mode);
         match &mut self.inner {
             Inner::Bam(reader) => {
                 let chrom_by_ref = reference_ids(header, aliases, chrom_id)?;
@@ -172,7 +184,7 @@ impl Reader {
                         &record,
                         &chrom_by_ref,
                         &mut names,
-                        track_extent,
+                        options,
                     )?)?;
                 }
             }
@@ -185,7 +197,7 @@ impl Reader {
                         aliases,
                         chrom_id,
                         &mut names,
-                        track_extent,
+                        options,
                     )?)?;
                 }
             }
@@ -200,7 +212,7 @@ fn parse_record(
     aliases: &HashMap<String, String>,
     chrom_id: &dyn Fn(&str) -> Option<u32>,
     names: &mut NameTracker,
-    track_extent: bool,
+    options: ReadOptions,
 ) -> Result<Segment> {
     use sam::alignment::record::data::field::Tag;
 
@@ -208,21 +220,23 @@ fn parse_record(
         .flags()
         .map_err(|error| RsomicsError::InvalidInput(format!("invalid alignment flags: {error}")))?;
     let (name, name_present, group_start) = names.read(record.name().map(|name| name.as_ref()));
-    let (reference, chrom) = reference_info(
+    let (reference, chrom, reference_length) = reference_info(
         record.reference_sequence_id(header),
         header,
         aliases,
         chrom_id,
     )?;
     let Geometry {
-        blocks,
+        mut blocks,
         split,
         extent,
+        ends,
     } = if flags.is_unmapped() {
         Geometry {
             blocks: Blocks::new(),
             split: false,
             extent: Extent::default(),
+            ends: Ends::default(),
         }
     } else {
         reference.ok_or_else(|| {
@@ -231,8 +245,16 @@ fn parse_record(
                 display_name(name.as_deref())
             ))
         })?;
-        cigar_geometry(record, chrom, track_extent)?
+        cigar_geometry(record, chrom, options.track_extent)?
     };
+    if !flags.is_unmapped() {
+        options.projection.apply(
+            &mut blocks,
+            ends,
+            reference_length,
+            flags.is_reverse_complemented(),
+        )?;
+    }
     let data = record.data();
     let nh = integer_tag(data.get(&Tag::ALIGNMENT_HIT_COUNT), "NH")?.unwrap_or(1);
     if nh == 0 {
@@ -319,24 +341,26 @@ fn cigar_geometry(
 
 fn parse_raw_record(
     record: &RecordRef<'_>,
-    chrom_by_ref: &[Option<u32>],
+    chrom_by_ref: &[ReferenceInfo],
     names: &mut NameTracker,
-    track_extent: bool,
+    options: ReadOptions,
 ) -> Result<Segment> {
     let flags = record.flags();
     let (name, name_present, group_start) = names.read(Some(record.name()));
     let reference = raw_reference_id(record.reference_sequence_id(), chrom_by_ref.len())?;
-    let chrom = reference.and_then(|id| chrom_by_ref[id]);
+    let chrom = reference.and_then(|id| chrom_by_ref[id].chrom);
     let unmapped = flags & 0x4 != 0;
     let Geometry {
-        blocks,
+        mut blocks,
         split,
         extent,
+        ends,
     } = if unmapped {
         Geometry {
             blocks: Blocks::new(),
             split: false,
             extent: Extent::default(),
+            ends: Ends::default(),
         }
     } else {
         reference.ok_or_else(|| {
@@ -345,8 +369,14 @@ fn parse_raw_record(
                 display_name(name.as_deref())
             ))
         })?;
-        raw_cigar_geometry(record, chrom, track_extent)?
+        raw_cigar_geometry(record, chrom, options.track_extent)?
     };
+    if !unmapped {
+        let length = reference.map_or(0, |id| chrom_by_ref[id].length);
+        options
+            .projection
+            .apply(&mut blocks, ends, length, flags & 0x10 != 0)?;
+    }
     let nh = raw_integer_tag(record, *b"NH")?.unwrap_or(1);
     if nh == 0 {
         return Err(RsomicsError::InvalidInput(format!(
@@ -481,14 +511,14 @@ fn reference_info(
     header: &sam::Header,
     aliases: &HashMap<String, String>,
     chrom_id: &dyn Fn(&str) -> Option<u32>,
-) -> Result<(Option<usize>, Option<u32>)> {
+) -> Result<(Option<usize>, Option<u32>, u64)> {
     let Some(id) = id.transpose().map_err(|error| {
         RsomicsError::InvalidInput(format!("invalid reference sequence identifier: {error}"))
     })?
     else {
-        return Ok((None, None));
+        return Ok((None, None, 0));
     };
-    let (name, _) = header.reference_sequences().get_index(id).ok_or_else(|| {
+    let (name, reference) = header.reference_sequences().get_index(id).ok_or_else(|| {
         RsomicsError::InvalidInput(format!(
             "reference sequence identifier {id} is absent from header"
         ))
@@ -497,23 +527,30 @@ fn reference_info(
         RsomicsError::InvalidInput(format!("reference sequence name is not UTF-8: {error}"))
     })?;
     let canonical = aliases.get(name).map_or(name, String::as_str);
-    Ok((Some(id), chrom_id(canonical)))
+    Ok((
+        Some(id),
+        chrom_id(canonical),
+        reference.length().get() as u64,
+    ))
 }
 
 fn reference_ids(
     header: &sam::Header,
     aliases: &HashMap<String, String>,
     chrom_id: &dyn Fn(&str) -> Option<u32>,
-) -> Result<Vec<Option<u32>>> {
+) -> Result<Vec<ReferenceInfo>> {
     header
         .reference_sequences()
-        .keys()
-        .map(|name| {
+        .iter()
+        .map(|(name, reference)| {
             let name = name.to_str().map_err(|error| {
                 RsomicsError::InvalidInput(format!("reference sequence name is not UTF-8: {error}"))
             })?;
             let canonical = aliases.get(name).map_or(name, String::as_str);
-            Ok(chrom_id(canonical))
+            Ok(ReferenceInfo {
+                chrom: chrom_id(canonical),
+                length: reference.length().get() as u64,
+            })
         })
         .collect()
 }

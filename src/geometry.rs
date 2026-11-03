@@ -2,11 +2,13 @@ use rsomics_common::{Result, RsomicsError};
 use smallvec::SmallVec;
 
 use crate::model::{Block, Blocks};
+use crate::projection::Ends;
 
 pub(crate) struct Geometry {
     pub(crate) blocks: Blocks,
     pub(crate) split: bool,
     pub(crate) extent: Extent,
+    pub(crate) ends: Ends,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -111,6 +113,7 @@ pub(crate) fn parse(
     let mut read_consumed = false;
     let mut trailing_clip = 0;
     let mut split = false;
+    let mut ends = None;
     for operation in operations {
         let (kind, length) = operation?;
         if length == 0 {
@@ -124,6 +127,7 @@ pub(crate) fn parse(
                 read_consumed = true;
             }
             1..=3 => {
+                record_ends(&mut ends, block_start, cursor);
                 if cursor > block_start {
                     blocks.push(Block::new(chrom, block_start, cursor)?);
                 }
@@ -165,6 +169,7 @@ pub(crate) fn parse(
         }
     }
     if cursor > block_start {
+        record_ends(&mut ends, block_start, cursor);
         blocks.push(Block::new(chrom, block_start, cursor)?);
         if track_extent {
             extent.intervals.push(Span {
@@ -183,5 +188,25 @@ pub(crate) fn parse(
         blocks,
         split,
         extent,
+        ends: ends.ok_or_else(|| {
+            RsomicsError::InvalidInput("mapped record has no CIGAR sections".to_owned())
+        })?,
     })
+}
+
+fn record_ends(ends: &mut Option<Ends>, start: u64, end: u64) {
+    match ends {
+        Some(ends) => {
+            ends.last_start = start;
+            ends.last_end = end;
+        }
+        None => {
+            *ends = Some(Ends {
+                first_start: start,
+                first_end: end,
+                last_start: start,
+                last_end: end,
+            });
+        }
+    }
 }

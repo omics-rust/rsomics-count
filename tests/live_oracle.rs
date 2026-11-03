@@ -192,6 +192,59 @@ fn featurecounts_2_1_1_contract() {
         }
         compare_annotation_case(&oracle, name, input, "read-fraction.saf", &source, &native);
     }
+    for (name, position, fraction) in [
+        ("projection-extensions", None, None),
+        ("projection-five", Some("5"), None),
+        ("projection-three", Some("3"), None),
+        ("projection-paired-low", Some("5"), Some(".05")),
+        ("projection-paired-high", Some("5"), Some(".1")),
+    ] {
+        let mut source = vec![
+            "-F",
+            "SAF",
+            "-O",
+            "--readExtension5",
+            "10",
+            "--readExtension3",
+            "7",
+        ];
+        let mut native = vec![
+            "-F",
+            "saf",
+            "--multi-overlap",
+            "full",
+            "--read-extension5",
+            "10",
+            "--read-extension3",
+            "7",
+        ];
+        if let Some(position) = position {
+            source.extend(["--read2pos", position]);
+            native.extend(["--read2pos", position]);
+        }
+        let stem = if let Some(fraction) = fraction {
+            source.extend([
+                "-p",
+                "--countReadPairs",
+                "-s",
+                "1",
+                "--fracOverlap",
+                fraction,
+            ]);
+            native.extend(["--paired", "--strand", "sense", "--frac-overlap", fraction]);
+            "projection-paired"
+        } else {
+            "projection"
+        };
+        compare_annotation_case(
+            &oracle,
+            name,
+            &format!("{stem}.sam"),
+            &format!("{stem}.saf"),
+            &source,
+            &native,
+        );
+    }
 }
 
 fn compare_case(

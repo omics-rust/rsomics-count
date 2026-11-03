@@ -1,0 +1,4 @@
+@HD	VN:1.6	SO:queryname
+@SQ	SN:chr1	LN:200
+pair	99	chr1	105	60	10M	=	115	20	AAAAAAAAAA	*	NH:i:1
+pair	147	chr1	115	60	10M	=	105	-20	AAAAAAAAAA	*	NH:i:1
