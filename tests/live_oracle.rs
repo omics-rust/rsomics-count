@@ -145,6 +145,13 @@ fn featurecounts_2_1_1_contract() {
     compare_case(&oracle, "edge-cigar", "edge.sam", &[], &[]);
     compare_case(
         &oracle,
+        "deletion-gap",
+        "deletion-gap.sam",
+        &["-O"],
+        &["--multi-overlap", "full"],
+    );
+    compare_case(
+        &oracle,
         "edge-primary",
         "edge.sam",
         &["--primary"],

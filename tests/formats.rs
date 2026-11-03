@@ -43,6 +43,43 @@ fn sam_to_bam(source: &Path, destination: &Path) {
 }
 
 #[test]
+fn deletion_gaps_do_not_overlap_features_in_sam_or_bam() {
+    let directory = tempfile::tempdir().unwrap();
+    let sam = fixture("deletion-gap.sam");
+    let bam = directory.path().join("deletion-gap.bam");
+    sam_to_bam(&sam, &bam);
+    for input in [&sam, &bam] {
+        let output = directory.path().join(format!(
+            "{}.tsv",
+            input.extension().unwrap().to_string_lossy()
+        ));
+        let result = Command::new(binary())
+            .arg(input)
+            .arg("-a")
+            .arg(fixture("model.gtf"))
+            .arg("-o")
+            .arg(&output)
+            .args(["--threads", "2", "--multi-overlap", "full"])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            output_counts(&output)
+                .iter()
+                .map(|row| row.last().unwrap().as_str())
+                .collect::<Vec<_>>(),
+            ["0", "0", "0"],
+            "{}",
+            input.display()
+        );
+    }
+}
+
+#[test]
 fn bam_uses_parallel_reader_and_matches_sam() {
     let directory = tempfile::tempdir().unwrap();
     let bam = directory.path().join("single.bam");

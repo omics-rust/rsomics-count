@@ -283,8 +283,8 @@ fn cigar_blocks(record: &dyn sam::alignment::Record, chrom: Option<u32>) -> Resu
             ));
         }
         match op.kind() {
-            Kind::Skip => {
-                split = true;
+            Kind::Skip | Kind::Deletion => {
+                split |= op.kind() == Kind::Skip;
                 if block_start < cursor {
                     blocks.push(Block::new(chrom, block_start, cursor)?);
                 }
@@ -399,8 +399,8 @@ fn raw_cigar_blocks(record: &RecordRef<'_>, chrom: Option<u32>) -> Result<(Block
             ));
         }
         match kind {
-            3 => {
-                split = true;
+            2 | 3 => {
+                split |= kind == 3;
                 if block_start < cursor {
                     blocks.push(Block::new(chrom, block_start, cursor)?);
                 }
@@ -409,7 +409,7 @@ fn raw_cigar_blocks(record: &RecordRef<'_>, chrom: Option<u32>) -> Result<(Block
                 })?;
                 block_start = cursor;
             }
-            0 | 2 | 7 | 8 => {
+            0 | 7 | 8 => {
                 cursor = cursor.checked_add(u64::from(len)).ok_or_else(|| {
                     RsomicsError::InvalidInput("CIGAR coordinate overflow".to_owned())
                 })?;
