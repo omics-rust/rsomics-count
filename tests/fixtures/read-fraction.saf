@@ -1,0 +1,7 @@
+GeneID	Chr	Start	End	Strand
+single	chr1	101	110	+
+union	chr1	201	210	+
+both	chr1	301	310	+
+same-insertion	chr1	401	410	+
+different-insertion	chr1	501	510	+
+one-insertion	chr1	601	610	+

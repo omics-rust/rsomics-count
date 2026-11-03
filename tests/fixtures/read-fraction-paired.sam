@@ -1,0 +1,12 @@
+@HD	VN:1.6	SO:queryname
+@SQ	SN:chr1	LN:2000
+both	99	chr1	301	60	10M	=	306	15	AAAAAAAAAA	*	NH:i:1
+both	147	chr1	306	60	10M	=	301	-15	AAAAAAAAAA	*	NH:i:1
+different-insertion	99	chr1	496	60	5M2I5M	=	496	10	AAAAAAAAAAAA	*	NH:i:1
+different-insertion	147	chr1	496	60	5M3I5M	=	496	-10	AAAAAAAAAAAAA	*	NH:i:1
+one-insertion	99	chr1	596	60	5M2I5M	=	596	10	AAAAAAAAAAAA	*	NH:i:1
+one-insertion	147	chr1	596	60	10M	=	596	-10	AAAAAAAAAA	*	NH:i:1
+same-insertion	99	chr1	396	60	5M2I5M	=	396	10	AAAAAAAAAAAA	*	NH:i:1
+same-insertion	147	chr1	396	60	5M2I5M	=	396	-10	AAAAAAAAAAAA	*	NH:i:1
+union	99	chr1	196	60	10M	=	191	-15	AAAAAAAAAA	*	NH:i:1
+union	147	chr1	191	60	10M	=	196	15	AAAAAAAAAA	*	NH:i:1

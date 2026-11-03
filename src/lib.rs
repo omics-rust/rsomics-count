@@ -5,6 +5,7 @@
 mod alignment;
 mod annotation;
 mod count;
+mod geometry;
 mod model;
 mod normalize;
 mod output;

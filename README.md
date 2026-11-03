@@ -9,6 +9,15 @@ GTF, GFF3, and SAF annotations; feature or meta-feature counting; multiple
 libraries; stranded and paired-fragment modes; overlap, mapping, and pair
 filters; and full or fractional multi-overlap and multi-mapping contributions.
 
+Current source corrects deletion-gap coverage and read-fraction calculations
+in the 0.1.0 distribution. `--frac-overlap` uses original CIGAR geometry,
+including insertion and soft-clip contributions; overlapping paired reads
+use fragment unions rather than summed mate lengths. Target overlap also
+counts shared mate coverage once. These corrections are not yet released.
+The [new source measurements](benchmarks/2026-11-03/README.md) preserve exact
+counts and summaries on representative inputs, with82–85% lower peak RSS
+and slower wall time than featureCounts.
+
 ```console
 rsomics-count sample.bam -a genes.gtf -o counts.tsv --summary counts.summary.tsv
 rsomics-count normalize counts.tsv -o tpm.tsv --mode tpm

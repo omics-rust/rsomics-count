@@ -101,7 +101,7 @@ struct CountArgs {
     #[arg(long, default_value_t = NonZeroU64::new(1).unwrap())]
     min_overlap: NonZeroU64,
 
-    /// Minimum fraction of aligned reference bases overlapping a target.
+    /// Minimum target overlap relative to original CIGAR read or fragment length.
     #[arg(long, default_value_t = 0.0, value_parser = ratio)]
     frac_overlap: f64,
 

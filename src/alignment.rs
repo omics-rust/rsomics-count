@@ -11,7 +11,8 @@ use noodles_util::alignment;
 use rsomics_bamio::raw::{RecordReader as RawRecordReader, RecordRef};
 use rsomics_common::{Context, Result, RsomicsError};
 
-use crate::model::{Block, Blocks};
+use crate::geometry::{self, Extent, Geometry};
+use crate::model::Blocks;
 
 enum Inner {
     Bam(rsomics_bamio::ParallelBamReader),
@@ -29,6 +30,7 @@ pub(crate) struct Segment {
     pub(crate) name_present: bool,
     pub(crate) group_start: bool,
     pub(crate) blocks: Blocks,
+    pub(crate) extent: Extent,
     pub(crate) reverse: bool,
     pub(crate) segmented: bool,
     pub(crate) first: bool,
@@ -154,6 +156,7 @@ impl Reader {
         aliases: &HashMap<String, String>,
         chrom_id: &dyn Fn(&str) -> Option<u32>,
         name_mode: NameMode,
+        track_extent: bool,
         mut visit: impl FnMut(Segment) -> Result<()>,
     ) -> Result<()> {
         let mut names = NameTracker::new(name_mode);
@@ -165,7 +168,12 @@ impl Reader {
                     .next()
                     .rs_with_context(|| format!("reading alignment record from {}", self.input))?
                 {
-                    visit(parse_raw_record(&record, &chrom_by_ref, &mut names)?)?;
+                    visit(parse_raw_record(
+                        &record,
+                        &chrom_by_ref,
+                        &mut names,
+                        track_extent,
+                    )?)?;
                 }
             }
             Inner::General(reader) => {
@@ -177,6 +185,7 @@ impl Reader {
                         aliases,
                         chrom_id,
                         &mut names,
+                        track_extent,
                     )?)?;
                 }
             }
@@ -191,6 +200,7 @@ fn parse_record(
     aliases: &HashMap<String, String>,
     chrom_id: &dyn Fn(&str) -> Option<u32>,
     names: &mut NameTracker,
+    track_extent: bool,
 ) -> Result<Segment> {
     use sam::alignment::record::data::field::Tag;
 
@@ -204,8 +214,16 @@ fn parse_record(
         aliases,
         chrom_id,
     )?;
-    let (blocks, split) = if flags.is_unmapped() {
-        (Blocks::new(), false)
+    let Geometry {
+        blocks,
+        split,
+        extent,
+    } = if flags.is_unmapped() {
+        Geometry {
+            blocks: Blocks::new(),
+            split: false,
+            extent: Extent::default(),
+        }
     } else {
         reference.ok_or_else(|| {
             RsomicsError::InvalidInput(format!(
@@ -213,7 +231,7 @@ fn parse_record(
                 display_name(name.as_deref())
             ))
         })?;
-        cigar_blocks(record, chrom)?
+        cigar_geometry(record, chrom, track_extent)?
     };
     let data = record.data();
     let nh = integer_tag(data.get(&Tag::ALIGNMENT_HIT_COUNT), "NH")?.unwrap_or(1);
@@ -241,6 +259,7 @@ fn parse_record(
         name_present,
         group_start,
         blocks,
+        extent,
         reverse: flags.is_reverse_complemented(),
         segmented: flags.is_segmented(),
         first: flags.is_first_segment(),
@@ -259,7 +278,11 @@ fn parse_record(
     })
 }
 
-fn cigar_blocks(record: &dyn sam::alignment::Record, chrom: Option<u32>) -> Result<(Blocks, bool)> {
+fn cigar_geometry(
+    record: &dyn sam::alignment::Record,
+    chrom: Option<u32>,
+    track_extent: bool,
+) -> Result<Geometry> {
     use sam::alignment::record::cigar::op::Kind;
 
     let start = record
@@ -269,61 +292,52 @@ fn cigar_blocks(record: &dyn sam::alignment::Record, chrom: Option<u32>) -> Resu
         .ok_or_else(|| {
             RsomicsError::InvalidInput("mapped record has no alignment start".to_owned())
         })?;
-    let mut cursor = u64::try_from(usize::from(start) - 1)
+    let start = u64::try_from(usize::from(start) - 1)
         .map_err(|_| RsomicsError::InvalidInput("alignment coordinate overflow".to_owned()))?;
-    let mut block_start = cursor;
-    let mut blocks = Blocks::new();
-    let mut split = false;
-    for result in record.cigar().iter() {
-        let op = result
-            .map_err(|error| RsomicsError::InvalidInput(format!("invalid CIGAR: {error}")))?;
-        if op.is_empty() {
-            return Err(RsomicsError::InvalidInput(
-                "CIGAR operation has zero length".to_owned(),
-            ));
-        }
-        match op.kind() {
-            Kind::Skip | Kind::Deletion => {
-                split |= op.kind() == Kind::Skip;
-                if block_start < cursor {
-                    blocks.push(Block::new(chrom, block_start, cursor)?);
-                }
-                cursor = cursor.checked_add(op.len() as u64).ok_or_else(|| {
-                    RsomicsError::InvalidInput("CIGAR coordinate overflow".to_owned())
-                })?;
-                block_start = cursor;
-            }
-            kind if kind.consumes_reference() => {
-                cursor = cursor.checked_add(op.len() as u64).ok_or_else(|| {
-                    RsomicsError::InvalidInput("CIGAR coordinate overflow".to_owned())
-                })?;
-            }
-            _ => {}
-        }
-    }
-    if block_start < cursor {
-        blocks.push(Block::new(chrom, block_start, cursor)?);
-    }
-    if blocks.is_empty() {
-        return Err(RsomicsError::InvalidInput(
-            "mapped record CIGAR consumes no reference bases".to_owned(),
-        ));
-    }
-    Ok((blocks, split))
+    geometry::parse(
+        start,
+        chrom,
+        record.cigar().iter().map(|result| {
+            let op = result
+                .map_err(|error| RsomicsError::InvalidInput(format!("invalid CIGAR: {error}")))?;
+            let kind = match op.kind() {
+                Kind::Match => 0,
+                Kind::Insertion => 1,
+                Kind::Deletion => 2,
+                Kind::Skip => 3,
+                Kind::SoftClip => 4,
+                Kind::HardClip => 5,
+                Kind::Pad => 6,
+                Kind::SequenceMatch => 7,
+                Kind::SequenceMismatch => 8,
+            };
+            Ok((kind, op.len() as u64))
+        }),
+        track_extent,
+    )
 }
 
 fn parse_raw_record(
     record: &RecordRef<'_>,
     chrom_by_ref: &[Option<u32>],
     names: &mut NameTracker,
+    track_extent: bool,
 ) -> Result<Segment> {
     let flags = record.flags();
     let (name, name_present, group_start) = names.read(Some(record.name()));
     let reference = raw_reference_id(record.reference_sequence_id(), chrom_by_ref.len())?;
     let chrom = reference.and_then(|id| chrom_by_ref[id]);
     let unmapped = flags & 0x4 != 0;
-    let (blocks, split) = if unmapped {
-        (Blocks::new(), false)
+    let Geometry {
+        blocks,
+        split,
+        extent,
+    } = if unmapped {
+        Geometry {
+            blocks: Blocks::new(),
+            split: false,
+            extent: Extent::default(),
+        }
     } else {
         reference.ok_or_else(|| {
             RsomicsError::InvalidInput(format!(
@@ -331,7 +345,7 @@ fn parse_raw_record(
                 display_name(name.as_deref())
             ))
         })?;
-        raw_cigar_blocks(record, chrom)?
+        raw_cigar_geometry(record, chrom, track_extent)?
     };
     let nh = raw_integer_tag(record, *b"NH")?.unwrap_or(1);
     if nh == 0 {
@@ -353,6 +367,7 @@ fn parse_raw_record(
         name_present,
         group_start,
         blocks,
+        extent,
         reverse: flags & 0x10 != 0,
         segmented: flags & 0x1 != 0,
         first: flags & 0x40 != 0,
@@ -384,53 +399,23 @@ fn raw_reference_id(value: i32, count: usize) -> Result<Option<usize>> {
     Ok(Some(id))
 }
 
-fn raw_cigar_blocks(record: &RecordRef<'_>, chrom: Option<u32>) -> Result<(Blocks, bool)> {
+fn raw_cigar_geometry(
+    record: &RecordRef<'_>,
+    chrom: Option<u32>,
+    track_extent: bool,
+) -> Result<Geometry> {
     let start = record.alignment_start();
-    let mut cursor = u64::try_from(start).map_err(|_| {
+    let start = u64::try_from(start).map_err(|_| {
         RsomicsError::InvalidInput("mapped record has no alignment start".to_owned())
     })?;
-    let mut block_start = cursor;
-    let mut blocks = Blocks::new();
-    let mut split = false;
-    for (kind, len) in record.cigar_ops() {
-        if len == 0 {
-            return Err(RsomicsError::InvalidInput(
-                "CIGAR operation has zero length".to_owned(),
-            ));
-        }
-        match kind {
-            2 | 3 => {
-                split |= kind == 3;
-                if block_start < cursor {
-                    blocks.push(Block::new(chrom, block_start, cursor)?);
-                }
-                cursor = cursor.checked_add(u64::from(len)).ok_or_else(|| {
-                    RsomicsError::InvalidInput("CIGAR coordinate overflow".to_owned())
-                })?;
-                block_start = cursor;
-            }
-            0 | 7 | 8 => {
-                cursor = cursor.checked_add(u64::from(len)).ok_or_else(|| {
-                    RsomicsError::InvalidInput("CIGAR coordinate overflow".to_owned())
-                })?;
-            }
-            1 | 4 | 5 | 6 => {}
-            _ => {
-                return Err(RsomicsError::InvalidInput(format!(
-                    "invalid BAM CIGAR operation code {kind}"
-                )));
-            }
-        }
-    }
-    if block_start < cursor {
-        blocks.push(Block::new(chrom, block_start, cursor)?);
-    }
-    if blocks.is_empty() {
-        return Err(RsomicsError::InvalidInput(
-            "mapped record CIGAR consumes no reference bases".to_owned(),
-        ));
-    }
-    Ok((blocks, split))
+    geometry::parse(
+        start,
+        chrom,
+        record
+            .cigar_ops()
+            .map(|(kind, len)| Ok((kind, u64::from(len)))),
+        track_extent,
+    )
 }
 
 fn raw_integer_tag(record: &RecordRef<'_>, tag: [u8; 2]) -> Result<Option<u32>> {
@@ -606,7 +591,7 @@ mod tests {
                 .collect(),
             )
             .build();
-        let (blocks, split) = cigar_blocks(&record, Some(0)).unwrap();
+        let Geometry { blocks, split, .. } = cigar_geometry(&record, Some(0), false).unwrap();
         assert_eq!((blocks[0].start, blocks[0].end), (100, 120));
         assert_eq!((blocks[1].start, blocks[1].end), (170, 180));
         assert!(split);

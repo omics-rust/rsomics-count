@@ -157,12 +157,58 @@ fn featurecounts_2_1_1_contract() {
         &["--primary"],
         &["--primary-only"],
     );
+    for (name, input, fraction, paired) in [
+        ("fraction-single", "read-fraction-single.sam", ".45", false),
+        (
+            "fraction-rounded",
+            "read-fraction-single.sam",
+            ".50001",
+            false,
+        ),
+        (
+            "fraction-paired-low",
+            "read-fraction-paired.sam",
+            ".3",
+            true,
+        ),
+        (
+            "fraction-paired-mid",
+            "read-fraction-paired.sam",
+            ".45",
+            true,
+        ),
+        (
+            "fraction-paired-high",
+            "read-fraction-paired.sam",
+            ".7",
+            true,
+        ),
+    ] {
+        let mut source = vec!["-F", "SAF", "--fracOverlap", fraction];
+        let mut native = vec!["-F", "saf", "--frac-overlap", fraction];
+        if paired {
+            source.extend(["-p", "--countReadPairs"]);
+            native.push("--paired");
+        }
+        compare_annotation_case(&oracle, name, input, "read-fraction.saf", &source, &native);
+    }
 }
 
 fn compare_case(
     oracle: &std::ffi::OsStr,
     name: &str,
     input: &str,
+    oracle_args: &[&str],
+    ours_args: &[&str],
+) {
+    compare_annotation_case(oracle, name, input, "model.gtf", oracle_args, ours_args);
+}
+
+fn compare_annotation_case(
+    oracle: &std::ffi::OsStr,
+    name: &str,
+    input: &str,
+    annotation: &str,
     oracle_args: &[&str],
     ours_args: &[&str],
 ) {
@@ -174,7 +220,7 @@ fn compare_case(
 
     let result = Command::new(oracle)
         .args(oracle_args)
-        .args(["-a", fixture("model.gtf").to_str().unwrap()])
+        .args(["-a", fixture(annotation).to_str().unwrap()])
         .args(["-o", oracle_counts.to_str().unwrap()])
         .arg(&input)
         .output()
@@ -186,7 +232,7 @@ fn compare_case(
     );
     let result = Command::new(binary())
         .arg(&input)
-        .args(["-a", fixture("model.gtf").to_str().unwrap()])
+        .args(["-a", fixture(annotation).to_str().unwrap()])
         .args(["-o", ours_counts.to_str().unwrap()])
         .args(["--summary", ours_summary.to_str().unwrap()])
         .args(["--threads", "1"])

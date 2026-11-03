@@ -43,6 +43,72 @@ fn sam_to_bam(source: &Path, destination: &Path) {
 }
 
 #[test]
+fn read_fraction_uses_original_cigar_and_fragment_unions() {
+    let directory = tempfile::tempdir().unwrap();
+    let single = fixture("read-fraction-single.sam");
+    let paired = fixture("read-fraction-paired.sam");
+    let bam = directory.path().join("paired.bam");
+    sam_to_bam(&paired, &bam);
+    for (name, input, fraction, is_paired, expected) in [
+        (
+            "single",
+            &single,
+            ".45",
+            false,
+            ["1", "0", "0", "0", "0", "0"],
+        ),
+        (
+            "paired-low",
+            &bam,
+            ".3",
+            true,
+            ["0", "1", "1", "1", "1", "1"],
+        ),
+        (
+            "paired-mid",
+            &paired,
+            ".45",
+            true,
+            ["0", "0", "1", "0", "1", "1"],
+        ),
+        (
+            "paired-high",
+            &bam,
+            ".7",
+            true,
+            ["0", "0", "0", "0", "0", "0"],
+        ),
+    ] {
+        let output = directory.path().join(format!("{name}.tsv"));
+        let mut command = Command::new(binary());
+        command
+            .arg(input)
+            .arg("-a")
+            .arg(fixture("read-fraction.saf"))
+            .arg("-o")
+            .arg(&output)
+            .args(["-F", "saf", "--threads", "2", "--frac-overlap", fraction]);
+        if is_paired {
+            command.arg("--paired");
+        }
+        let result = command.output().unwrap();
+        assert!(
+            result.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            output_counts(&output)
+                .iter()
+                .map(|row| row.last().unwrap().as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn deletion_gaps_do_not_overlap_features_in_sam_or_bam() {
     let directory = tempfile::tempdir().unwrap();
     let sam = fixture("deletion-gap.sam");

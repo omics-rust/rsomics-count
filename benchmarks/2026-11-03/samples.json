@@ -1,0 +1,35 @@
+{
+  "packet": "/Volumes/KIOXIA/Developments/tmp/count-read-fraction-perf-20261103.jmlsTpR5",
+  "result_sha256": "fd87cd4a329939b9bfbfda3cca9716c06c09efa40b26365970244c0789307fea",
+  "verified_sha256": "db953177df8aee1025944c29e21cef97f6f442fe86cd8e65dc55e3a2484bd0ba",
+  "verifier_sha256": "93d3661b4888b8c1818ecc7a14e328561734eeede7268f6ffc3d7dcbac2aac54",
+  "measure_helper_sha256": "a93267838ade1ebe8908630a906d484121a2393d55872015016273c1ad8ef854",
+  "native_sha256": "9f1ffcc2b4ebe24cade74e5cfd0c04d0722765c80e018789a37da9752ed9b88c",
+  "native_bytes": 3000544,
+  "source_version": "featureCounts 2.1.1",
+  "source_sha256": "3249dea2e90721618f8af4fb547ff1e9bab987620762c1e24148b149487f8ea5",
+  "generator_sha256": "aa3a62756bd0c424b212f7e1d1e6de055a19e56bba844ee4b931c93e93dee5e2",
+  "annotation_sha256": "2e43ca96b0be1d328b300c33aa386fb053fd912c2b2f93f46860dcc5b976c914",
+  "single_bam_sha256": "714c6579906767abaacb94fa3ccd0e30417a31954c9d5ce5b6922e25d44a9e91",
+  "paired_bam_sha256": "602c99b988ab35d081acc34de2e3780d8bea8b06ff96650f5e42524d2d4fb8f8",
+  "threads": 4,
+  "warmups_per_tool_per_case": 1,
+  "measured_samples_per_tool_per_case": 5,
+  "complete_output_pairs": 12,
+  "cases": [
+    {
+      "name": "single-default",
+      "native_wall_seconds": [0.460603833, 0.468559875, 0.503679166, 0.469265667, 0.482095583],
+      "source_wall_seconds": [0.274672292, 0.317979, 0.279353584, 0.324971084, 0.317002375],
+      "native_max_rss_bytes": [10108928, 10108928, 21544960, 12058624, 10076160],
+      "source_max_rss_bytes": [68501504, 68534272, 68534272, 68468736, 68485120]
+    },
+    {
+      "name": "paired-fraction",
+      "native_wall_seconds": [0.644384083, 0.58997525, 0.571420584, 0.569743875, 0.566623167],
+      "source_wall_seconds": [0.341280792, 0.34049625, 0.38601775, 0.341534292, 0.33547875],
+      "native_max_rss_bytes": [12107776, 15990784, 12075008, 10272768, 13975552],
+      "source_max_rss_bytes": [69107712, 69091328, 69058560, 69074944, 69124096]
+    }
+  ]
+}

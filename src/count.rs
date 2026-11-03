@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 
 use crate::alignment::{NameMode, Reader, Segment};
 use crate::annotation::{self, AnnotationOptions};
-use crate::model::{Block, Blocks, FeatureSet, Hit, Hits, StrandMode};
+use crate::model::{Blocks, FeatureSet, Hit, Hits, StrandMode};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Contribution {
@@ -351,6 +351,7 @@ fn count_library(
             aliases,
             &|name| features.chrom_id(name),
             NameMode::None,
+            options.frac_overlap > 0.0,
             |segment| {
                 process_unit(
                     Unit::single(segment),
@@ -382,6 +383,7 @@ fn count_pairs(
             context.aliases,
             &|name| context.features.chrom_id(name),
             NameMode::Grouped,
+            context.options.frac_overlap > 0.0,
             |segment| {
                 if !segment.segmented || segment.first == segment.last {
                     result.summary.unassigned_read_type += 1;
@@ -410,6 +412,7 @@ fn count_pairs(
             context.aliases,
             &|name| context.features.chrom_id(name),
             NameMode::Owned,
+            context.options.frac_overlap > 0.0,
             |mut segment| {
                 if !segment.segmented || segment.first == segment.last {
                     result.summary.unassigned_read_type += 1;
@@ -480,6 +483,7 @@ fn count_queryname_pairs_parallel(
             context.aliases,
             &|name| context.features.chrom_id(name),
             NameMode::Grouped,
+            context.options.frac_overlap > 0.0,
             |segment| {
                 if !segment.segmented || segment.first == segment.last {
                     result.summary.unassigned_read_type += 1;
@@ -683,6 +687,7 @@ fn count_single_parallel(
             context.aliases,
             &|name| context.features.chrom_id(name),
             NameMode::None,
+            context.options.frac_overlap > 0.0,
             |segment| {
                 batch.push(segment);
                 if batch.len() == BATCH_SIZE {
@@ -763,19 +768,23 @@ struct Unit {
     nh: u32,
     split: bool,
     invalid_fragment_length: bool,
+    read_bases: u64,
 }
 
 struct BlockGroup {
     blocks: Blocks,
     reverse: bool,
+    reference: Option<usize>,
 }
 
 impl Unit {
     fn single(segment: Segment) -> Self {
+        let read_bases = segment.extent.length();
         let mut block_groups = SmallVec::new();
         block_groups.push(BlockGroup {
             blocks: segment.blocks,
             reverse: segment.reverse,
+            reference: segment.reference,
         });
         Self {
             block_groups,
@@ -786,11 +795,22 @@ impl Unit {
             nh: segment.nh,
             split: segment.split,
             invalid_fragment_length: false,
+            read_bases,
         }
     }
 
     fn pair(pair: PairBucket) -> Self {
         let segments = [pair.first, pair.last];
+        let read_bases = match (&segments[0], &segments[1]) {
+            (Some(first), Some(last)) if first.reference == last.reference => {
+                first.extent.union_length(&last.extent)
+            }
+            _ => segments
+                .iter()
+                .flatten()
+                .map(|segment| segment.extent.length())
+                .sum(),
+        };
         let secondary = segments.iter().flatten().any(|segment| segment.secondary);
         let duplicate = segments.iter().flatten().any(|segment| segment.duplicate);
         let mapq = segments
@@ -813,6 +833,7 @@ impl Unit {
                 block_groups.push(BlockGroup {
                     blocks: segment.blocks,
                     reverse: segment.reverse ^ segment.last,
+                    reference: segment.reference,
                 });
             }
         }
@@ -825,6 +846,7 @@ impl Unit {
             nh,
             split,
             invalid_fragment_length: false,
+            read_bases,
         }
     }
 }
@@ -873,23 +895,18 @@ fn process_unit(
         &unit.block_groups,
         strand,
         options.frac_overlap_feature > 0.0,
+        options.min_overlap > 1 || options.frac_overlap > 0.0,
     );
     if raw_hits.is_empty() {
         result.summary.unassigned_no_features += 1;
         return Ok(());
     }
-    let read_bases: u64 = unit
-        .block_groups
-        .iter()
-        .flat_map(|group| &group.blocks)
-        .map(Block::len)
-        .sum();
+    let minimum_overlap = options
+        .min_overlap
+        .max(fractional_minimum(unit.read_bases, options.frac_overlap));
     let overlap_hits: Hits = raw_hits
         .into_iter()
-        .filter(|hit| {
-            hit.overlap_bases >= options.min_overlap
-                && ratio_at_least(hit.overlap_bases, read_bases, options.frac_overlap)
-        })
+        .filter(|hit| hit.overlap_bases >= minimum_overlap)
         .collect();
     if overlap_hits.is_empty() {
         result.summary.unassigned_overlapping_length += 1;
@@ -940,11 +957,18 @@ fn ratio_at_least(numerator: u64, denominator: u64, threshold: f64) -> bool {
     threshold == 0.0 || numerator as f64 / denominator as f64 >= threshold
 }
 
+fn fractional_minimum(length: u64, fraction: f64) -> u64 {
+    let minimum = length as f64 * fraction;
+    let integral = minimum as u64;
+    integral + u64::from(minimum - integral as f64 >= 0.001)
+}
+
 fn unit_hits(
     features: &FeatureSet,
     groups: &[BlockGroup],
     strand: StrandMode,
     track_feature_fraction: bool,
+    merge_overlap: bool,
 ) -> Hits {
     let per_group: SmallVec<[Hits; 2]> = groups
         .iter()
@@ -985,12 +1009,26 @@ fn unit_hits(
             }
         }
     }
+    if merge_overlap {
+        let groups: SmallVec<[_; 2]> = groups
+            .iter()
+            .map(|group| {
+                let partition = u32::from(group.reference != groups[0].reference);
+                (group.blocks.as_slice(), group.reverse, partition)
+            })
+            .collect();
+        for hit in features.hits_grouped(&groups, strand, false) {
+            if let Some(current) = overlap.get_mut(&hit.row) {
+                current.overlap_bases = hit.overlap_bases;
+            }
+        }
+    }
     overlap.into_values().collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::model::{CountLevel, PartInput, Strand};
+    use crate::model::{Block, CountLevel, PartInput, Strand};
 
     use super::*;
 
@@ -1022,6 +1060,7 @@ mod tests {
             block_groups: smallvec::smallvec![BlockGroup {
                 blocks: smallvec::smallvec![Block::new(Some(0), 145, 155).unwrap()],
                 reverse: false,
+                reference: Some(0),
             }],
             unmapped: false,
             secondary: false,
@@ -1030,6 +1069,7 @@ mod tests {
             nh: 1,
             split: false,
             invalid_fragment_length: false,
+            read_bases: 10,
         }
     }
 

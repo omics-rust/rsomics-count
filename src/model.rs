@@ -72,10 +72,6 @@ impl Block {
             end: interval.end(),
         })
     }
-
-    pub(crate) const fn len(&self) -> u64 {
-        self.end - self.start
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -230,8 +226,17 @@ impl FeatureSet {
         reverse: bool,
         track_feature_fraction: bool,
     ) -> Hits {
+        self.hits_grouped(&[(blocks, reverse, 0)], strand_mode, track_feature_fraction)
+    }
+
+    pub(crate) fn hits_grouped(
+        &self,
+        groups: &[(&[Block], bool, u32)],
+        strand_mode: StrandMode,
+        track_feature_fraction: bool,
+    ) -> Hits {
         let mut candidates = SmallVec::<[usize; 16]>::new();
-        for block in blocks {
+        for block in groups.iter().flat_map(|(blocks, _, _)| *blocks) {
             let Some(chrom) = block.chrom else {
                 continue;
             };
@@ -253,20 +258,22 @@ impl FeatureSet {
         let mut feature_overlaps = SmallVec::<[(usize, u64, u64); 16]>::new();
         for part_index in candidates {
             let part = &self.parts[part_index];
-            if !strand_matches(part.strand, strand_mode, reverse) {
-                continue;
-            }
             let mut part_intersections = SmallVec::<[(u64, u64); 4]>::new();
-            for block in blocks
-                .iter()
-                .filter(|block| block.chrom == Some(part.chrom_id))
-            {
-                let start = block.start.max(part.interval.start());
-                let end = block.end.min(part.interval.end());
-                if start < end {
-                    intersections.push((part.row, part.chrom_id, start, end));
-                    if track_feature_fraction {
-                        part_intersections.push((start, end));
+            for &(blocks, reverse, partition) in groups {
+                if !strand_matches(part.strand, strand_mode, reverse) {
+                    continue;
+                }
+                for block in blocks
+                    .iter()
+                    .filter(|block| block.chrom == Some(part.chrom_id))
+                {
+                    let start = block.start.max(part.interval.start());
+                    let end = block.end.min(part.interval.end());
+                    if start < end {
+                        intersections.push((part.row, partition, start, end));
+                        if track_feature_fraction {
+                            part_intersections.push((start, end));
+                        }
                     }
                 }
             }
